@@ -25,8 +25,6 @@ CONFIGS = [
     FieldName.CTRL_POWER_LIFTING,
     FieldName.CTRL_SPLIT_PHASE,
     FieldName.CTRL_UPS_MODE,
-    FieldName.GRID_EXPORT_ENABLED,
-    FieldName.ADV_LOGIN_PASSWORD,
 ]
 
 
