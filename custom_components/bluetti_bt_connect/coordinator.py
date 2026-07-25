@@ -6,7 +6,7 @@ from datetime import timedelta
 import logging
 from homeassistant.components import bluetooth
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from bluetti_bt_connect_lib import build_device, DeviceReader, DeviceReaderConfig
 
 from .utils import mac_loggable
@@ -69,15 +69,19 @@ class PollingCoordinator(DataUpdateCoordinator):
             is False
         ):
             self.logger.warning("Device not connected")
-            self.last_update_success = False
-            return None
+            raise UpdateFailed("Device not connected")
 
         if self.reader is None:
             self.logger.error(
                 "Reader not initialized - device type may be unsupported: %s",
                 self.config.name,
             )
-            self.last_update_success = False
-            return None
+            raise UpdateFailed(
+                f"Reader not initialized - device type may be unsupported: {self.config.name}"
+            )
 
-        return await self.reader.read()
+        data = await self.reader.read()
+        if data is None:
+            raise UpdateFailed("Error while reading data from device")
+
+        return data
