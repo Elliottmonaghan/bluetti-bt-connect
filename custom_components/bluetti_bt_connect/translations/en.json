@@ -348,6 +348,9 @@
             },
             "ctrl_power_off": {
                 "name": "Poweroff"
+            },
+            "grid_export_enabled": {
+                "name": "Grid Export"
             }
         },
         "select": {
@@ -412,6 +415,11 @@
             },
             "power_lifting_on": {
                 "name": "Power Lifting"
+            }
+        },
+        "text": {
+            "adv_login_password": {
+                "name": "Advanced Settings Password"
             }
         }
     }
