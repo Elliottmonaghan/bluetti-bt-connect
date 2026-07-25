@@ -146,7 +146,14 @@ class BluettiText(CoordinatorEntity, TextEntity):
 
     @callback
     def _handle_coordinator_update(self) -> None:
-        """Handle updated data from the coordinator."""
+        """Handle updated data from the coordinator.
+
+        This entity is write-only (e.g. a password/unlock field) and is
+        deliberately excluded from regular polling, so it will never have
+        its own data in coordinator.data. Availability is instead based on
+        whether the coordinator has valid data at all, i.e. whether the
+        device is reachable, rather than on this specific field.
+        """
 
         if self.coordinator.data is None:
             self._logger.debug(
@@ -166,23 +173,7 @@ class BluettiText(CoordinatorEntity, TextEntity):
             self._set_unavailable("Invalid data")
             return
 
-        response_data = self.coordinator.data.get(self._response_key)
-        if response_data is None:
-            self._set_unavailable("No data")
-            return
-
-        if not isinstance(response_data, str):
-            self._logger.warning(
-                "Invalid response data type from coordinator (text.%s): %s",
-                unique_id_logable(self._attr_unique_id),
-                response_data,
-            )
-            self._set_unavailable("Invalid data type")
-            return
-
         self._set_available()
-        self._attr_native_value = response_data
-        self.async_write_ha_state()
 
     async def async_set_value(self, value: str) -> None:
         """Set the value."""
