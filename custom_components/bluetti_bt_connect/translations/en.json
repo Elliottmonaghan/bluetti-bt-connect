@@ -322,12 +322,6 @@
             },
             "total_pv_power": {
                 "name": "Total PV Power"
-            },
-            "working_mode": {
-                "name": "Working Mode"
-            },
-            "ac_output_total_power": {
-                "name": "AC Output Total Power"
             }
         },
         "switch": {
@@ -354,6 +348,9 @@
             },
             "ctrl_power_off": {
                 "name": "Poweroff"
+            },
+            "grid_export_enabled": {
+                "name": "Grid Export"
             }
         },
         "select": {
@@ -418,6 +415,11 @@
             },
             "power_lifting_on": {
                 "name": "Power Lifting"
+            }
+        },
+        "text": {
+            "adv_login_password": {
+                "name": "Advanced Settings Password"
             }
         }
     }
