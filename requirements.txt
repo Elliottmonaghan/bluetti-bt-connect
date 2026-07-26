@@ -1,2 +1,0 @@
-homeassistant
-bluetti-bt-connect-lib
