@@ -322,6 +322,12 @@
             },
             "total_pv_power": {
                 "name": "Total PV Power"
+            },
+            "working_mode": {
+                "name": "Working Mode"
+            },
+            "ac_output_total_power": {
+                "name": "AC Output Total Power"
             }
         },
         "switch": {
