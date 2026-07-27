@@ -322,6 +322,27 @@
             },
             "total_pv_power": {
                 "name": "Total PV Power"
+            },
+            "bms_controller_model": {
+                "name": "Battery Controller (BMS) Model"
+            },
+            "voltage": {
+                "name": "Battery Pack Voltage"
+            },
+            "battery_soc": {
+                "name": "Battery Pack SOC"
+            },
+            "soh": {
+                "name": "Battery Pack SOH"
+            },
+            "active_cell_count": {
+                "name": "Active Cell Count"
+            },
+            "battery_stack_count": {
+                "name": "Battery Stack Count"
+            },
+            "total_node_count": {
+                "name": "Total Node Count"
             }
         },
         "switch": {
