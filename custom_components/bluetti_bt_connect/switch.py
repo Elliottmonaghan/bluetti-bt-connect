@@ -52,16 +52,22 @@ from .utils import mac_loggable, unique_id_logable
 # switch has worked reliably without any of this, and we don't want to
 # change behavior for anything that already works.
 SETTINGS_KEEPALIVE_REGISTER = 21000
-SETTINGS_KEEPALIVE_REPEATS = 9
-SETTINGS_KEEPALIVE_INTERVAL_SECONDS = 1
-# Same register ranges observed in the app's own normal polling traffic
-# (100, 2000, 2200), read directly rather than via DeviceReader.read() -
-# that method unconditionally disconnects the client when it finishes
-# (see device_reader.py), which would kill our connection mid-sequence
-# since we need to reuse the same connection all the way through to the
-# actual write afterward.
-SETTINGS_WARMUP_READS = [(100, 93), (2000, 94), (2200, 105)]
-SETTINGS_WARMUP_READ_REPEATS = 2
+# The exact sequence observed, in order, across every capture analyzed
+# (July 27-28): six specific reads, always in this order, followed by a
+# single write to register 21000. In the one capture where a pending HA
+# write was independently confirmed to commit (log5.pklg), it did so in
+# the ~0.9 second window immediately after this exact sequence completed,
+# and before anything else happened. Earlier attempts approximated this
+# with generic reads/repeated writes; this replicates the actual observed
+# sequence precisely instead of a rough approximation.
+SETTINGS_WARMUP_READS = [
+    (1, 16),
+    (100, 93),
+    (2000, 94),
+    (2200, 105),
+    (6000, 42),
+    (6100, 104),
+]
 SETTINGS_WARMUP_READ_TIMEOUT_SECONDS = 5
 
 FIELDS_REQUIRING_KEEPALIVE = {FieldName.GRID_EXPORT_ENABLED.value}
@@ -257,11 +263,11 @@ class BluettiSwitch(CoordinatorEntity, SwitchEntity):
             # polling coordinator stepping in between them, and the
             # connection is never disconnected until we're fully done.
             async with self._lock:
-                async with async_timeout.timeout(90):
+                async with async_timeout.timeout(45):
                     try:
                         if needs_keepalive:
                             self._logger.debug(
-                                "Warming up connection with real register reads before writing %s",
+                                "Replaying observed connection sequence before writing %s",
                                 self._response_key,
                             )
 
@@ -273,40 +279,35 @@ class BluettiSwitch(CoordinatorEntity, SwitchEntity):
 
                             await client.start_notify(NOTIFY_UUID, _on_notify)
 
-                            for _ in range(SETTINGS_WARMUP_READ_REPEATS):
-                                for addr, qty in SETTINGS_WARMUP_READS:
-                                    notify_future = self.hass.loop.create_future()
-                                    read_cmd = ReadableRegisters(addr, qty)
-                                    await client.write_gatt_char(
-                                        WRITE_UUID, bytes(read_cmd)
+                            for addr, qty in SETTINGS_WARMUP_READS:
+                                notify_future = self.hass.loop.create_future()
+                                read_cmd = ReadableRegisters(addr, qty)
+                                await client.write_gatt_char(
+                                    WRITE_UUID, bytes(read_cmd)
+                                )
+                                try:
+                                    async with async_timeout.timeout(
+                                        SETTINGS_WARMUP_READ_TIMEOUT_SECONDS
+                                    ):
+                                        await notify_future
+                                except TimeoutError:
+                                    self._logger.debug(
+                                        "Warm-up read of address %s timed out, continuing anyway",
+                                        addr,
                                     )
-                                    try:
-                                        async with async_timeout.timeout(
-                                            SETTINGS_WARMUP_READ_TIMEOUT_SECONDS
-                                        ):
-                                            await notify_future
-                                    except TimeoutError:
-                                        self._logger.debug(
-                                            "Warm-up read of address %s timed out, continuing anyway",
-                                            addr,
-                                        )
 
                             await client.stop_notify(NOTIFY_UUID)
 
                             self._logger.debug(
-                                "Sending settings keep-alive sequence before writing %s",
+                                "Sending settings keep-alive write before writing %s",
                                 self._response_key,
                             )
-                            for _ in range(SETTINGS_KEEPALIVE_REPEATS):
-                                keepalive_cmd = WriteableRegister(
-                                    SETTINGS_KEEPALIVE_REGISTER, 1
-                                )
-                                await client.write_gatt_char(
-                                    WRITE_UUID, bytes(keepalive_cmd)
-                                )
-                                await asyncio.sleep(
-                                    SETTINGS_KEEPALIVE_INTERVAL_SECONDS
-                                )
+                            keepalive_cmd = WriteableRegister(
+                                SETTINGS_KEEPALIVE_REGISTER, 1
+                            )
+                            await client.write_gatt_char(
+                                WRITE_UUID, bytes(keepalive_cmd)
+                            )
 
                         command = self._bluetti_device.build_write_command(
                             self._field.name, state
