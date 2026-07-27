@@ -21,6 +21,8 @@ from bluetti_bt_connect_lib import (
     BluettiDevice,
     DeviceField,
     FieldName,
+    DeviceReader,
+    DeviceReaderConfig,
 )
 from bluetti_bt_connect_lib.registers import WriteableRegister
 from bluetti_bt_connect_lib.const import WRITE_UUID
@@ -36,19 +38,26 @@ from .utils import mac_loggable, unique_id_logable
 # written repeatedly (~once per second) the entire time the Settings screen
 # is open - a "presence" heartbeat, not tied to any specific toggle action.
 #
-# The repeat count below was extended from an initial 4 to 9 after direct
-# user observation: the app's own Settings controls stay visibly greyed
-# out/unpressable for roughly 5-10 seconds after opening, before becoming
-# interactive - and a previously "stuck" HA-originated write was observed
-# to finally take effect right as that grey-out period ended. The original
-# 4-repeat (~4 second) version did not reliably reproduce this. 9 repeats
-# gives roughly 9 seconds of run-up before the real write, better matching
-# that observed window. Still an unverified hypothesis, scoped narrowly to
-# this one field - every other switch has worked reliably without this,
-# and we don't want to change behavior for anything that already works.
+# Direct log analysis (July 27) showed a previously-pending HA write to
+# grid export actually take effect ~8-9 seconds into a *fresh* app
+# connection, with no write to register 2208 anywhere near that moment -
+# strongly suggesting the trigger isn't the keep-alive write specifically,
+# but a period of sustained, successful two-way communication (the app
+# continuously reads many registers throughout this whole window, not just
+# writing 21000). The pure keep-alive-only version (repeated writes, no
+# reads) was tested live and did not resolve the issue.
+#
+# This version adds real register reads during the warm-up period,
+# reusing the existing connection via DeviceReader's ble_client parameter,
+# to more faithfully replicate what the app actually does. Still an
+# unverified hypothesis, scoped narrowly to this one field - every other
+# switch has worked reliably without any of this, and we don't want to
+# change behavior for anything that already works.
 SETTINGS_KEEPALIVE_REGISTER = 21000
 SETTINGS_KEEPALIVE_REPEATS = 9
 SETTINGS_KEEPALIVE_INTERVAL_SECONDS = 1
+SETTINGS_WARMUP_READ_REPEATS = 4
+SETTINGS_WARMUP_READ_INTERVAL_SECONDS = 2
 
 FIELDS_REQUIRING_KEEPALIVE = {FieldName.GRID_EXPORT_ENABLED.value}
 
@@ -238,13 +247,38 @@ class BluettiSwitch(CoordinatorEntity, SwitchEntity):
             needs_keepalive = self._response_key in FIELDS_REQUIRING_KEEPALIVE
 
             # Everything below runs under one lock acquisition and one
-            # continuous connection, so the keep-alive sequence and the
-            # actual write can never be split apart by the polling
-            # coordinator stepping in between them.
+            # continuous connection, so the warm-up reads, keep-alive
+            # writes, and the actual write can never be split apart by the
+            # polling coordinator stepping in between them.
             async with self._lock:
-                async with async_timeout.timeout(30):
+                async with async_timeout.timeout(90):
                     try:
                         if needs_keepalive:
+                            self._logger.debug(
+                                "Warming up connection with real register reads before writing %s",
+                                self._response_key,
+                            )
+                            # Fresh, dedicated lock - NOT self._lock. We're
+                            # already holding that one for this whole
+                            # sequence, and DeviceReader.read() acquires
+                            # its own lock internally, so reusing self._lock
+                            # here would deadlock. A private lock is fine
+                            # since our own outer lock already prevents any
+                            # real concurrent access during this call.
+                            warmup_reader = DeviceReader(
+                                self._address,
+                                self._bluetti_device,
+                                self.hass.loop.create_future,
+                                DeviceReaderConfig(timeout=15),
+                                asyncio.Lock(),
+                                ble_client=client,
+                            )
+                            for _ in range(SETTINGS_WARMUP_READ_REPEATS):
+                                await warmup_reader.read()
+                                await asyncio.sleep(
+                                    SETTINGS_WARMUP_READ_INTERVAL_SECONDS
+                                )
+
                             self._logger.debug(
                                 "Sending settings keep-alive sequence before writing %s",
                                 self._response_key,
