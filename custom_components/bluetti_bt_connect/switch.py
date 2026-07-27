@@ -35,14 +35,19 @@ from .utils import mac_loggable, unique_id_logable
 # Register 21000 was observed in the official app's own Bluetooth traffic,
 # written repeatedly (~once per second) the entire time the Settings screen
 # is open - a "presence" heartbeat, not tied to any specific toggle action.
-# Hypothesis being tested: the device may require this ongoing signal
-# before it will actually apply writes to protected settings like grid
-# export, which could explain why our own writes to that register haven't
-# reliably stuck in earlier testing. Scoped narrowly to this one field only
-# - every other switch has worked reliably without this, and we don't want
-# to change behavior for anything that already works correctly.
+#
+# The repeat count below was extended from an initial 4 to 9 after direct
+# user observation: the app's own Settings controls stay visibly greyed
+# out/unpressable for roughly 5-10 seconds after opening, before becoming
+# interactive - and a previously "stuck" HA-originated write was observed
+# to finally take effect right as that grey-out period ended. The original
+# 4-repeat (~4 second) version did not reliably reproduce this. 9 repeats
+# gives roughly 9 seconds of run-up before the real write, better matching
+# that observed window. Still an unverified hypothesis, scoped narrowly to
+# this one field - every other switch has worked reliably without this,
+# and we don't want to change behavior for anything that already works.
 SETTINGS_KEEPALIVE_REGISTER = 21000
-SETTINGS_KEEPALIVE_REPEATS = 4
+SETTINGS_KEEPALIVE_REPEATS = 9
 SETTINGS_KEEPALIVE_INTERVAL_SECONDS = 1
 
 FIELDS_REQUIRING_KEEPALIVE = {FieldName.GRID_EXPORT_ENABLED.value}
