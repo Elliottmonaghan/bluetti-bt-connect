@@ -53,13 +53,12 @@ from .utils import mac_loggable, unique_id_logable
 # change behavior for anything that already works.
 SETTINGS_KEEPALIVE_REGISTER = 21000
 # The exact sequence observed, in order, across every capture analyzed
-# (July 27-28): six specific reads, always in this order, followed by a
-# single write to register 21000. In the one capture where a pending HA
-# write was independently confirmed to commit (log5.pklg), it did so in
-# the ~0.9 second window immediately after this exact sequence completed,
-# and before anything else happened. Earlier attempts approximated this
-# with generic reads/repeated writes; this replicates the actual observed
-# sequence precisely instead of a rough approximation.
+# (July 27-28, including a full airplane-mode test confirming this is
+# entirely Bluetooth-local, no internet dependency involved): six specific
+# reads, always in this order, followed by a single write to register
+# 21000. In the one capture where a pending HA write was independently
+# confirmed to commit (log5.pklg), it did so in the ~0.9 second window
+# immediately after this exact sequence completed.
 SETTINGS_WARMUP_READS = [
     (1, 16),
     (100, 93),
@@ -69,6 +68,16 @@ SETTINGS_WARMUP_READS = [
     (6100, 104),
 ]
 SETTINGS_WARMUP_READ_TIMEOUT_SECONDS = 5
+
+# After the initial sequence + keep-alive write, the app doesn't just stop
+# and write - it continues its normal ~1/sec polling loop (a narrower
+# subset: 100, 2000, 2200, 6000, 6100 - no register 1, no 21000 again) for
+# several more seconds before any further action. This replicates that
+# sustained activity rather than jumping straight to the write immediately
+# after the one-shot sequence, in case the device expects continued
+# activity rather than just the initial handshake alone.
+SETTINGS_POLLING_CYCLE = [(100, 93), (2000, 94), (2200, 105), (6000, 42), (6100, 104)]
+SETTINGS_POLLING_CYCLE_REPEATS = 5
 
 FIELDS_REQUIRING_KEEPALIVE = {FieldName.GRID_EXPORT_ENABLED.value}
 
@@ -308,6 +317,31 @@ class BluettiSwitch(CoordinatorEntity, SwitchEntity):
                             await client.write_gatt_char(
                                 WRITE_UUID, bytes(keepalive_cmd)
                             )
+
+                            self._logger.debug(
+                                "Continuing normal polling cycle before writing %s, "
+                                "matching the app's sustained behavior",
+                                self._response_key,
+                            )
+                            await client.start_notify(NOTIFY_UUID, _on_notify)
+                            for _ in range(SETTINGS_POLLING_CYCLE_REPEATS):
+                                for addr, qty in SETTINGS_POLLING_CYCLE:
+                                    notify_future = self.hass.loop.create_future()
+                                    read_cmd = ReadableRegisters(addr, qty)
+                                    await client.write_gatt_char(
+                                        WRITE_UUID, bytes(read_cmd)
+                                    )
+                                    try:
+                                        async with async_timeout.timeout(
+                                            SETTINGS_WARMUP_READ_TIMEOUT_SECONDS
+                                        ):
+                                            await notify_future
+                                    except TimeoutError:
+                                        self._logger.debug(
+                                            "Polling-cycle read of address %s timed out, continuing anyway",
+                                            addr,
+                                        )
+                            await client.stop_notify(NOTIFY_UUID)
 
                         command = self._bluetti_device.build_write_command(
                             self._field.name, state
