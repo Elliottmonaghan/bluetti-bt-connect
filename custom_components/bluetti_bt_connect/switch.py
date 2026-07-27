@@ -19,67 +19,16 @@ from homeassistant.helpers.update_coordinator import (
 from bluetti_bt_connect_lib import (
     build_device,
     BluettiDevice,
+    DeviceWriter,
     DeviceField,
     FieldName,
 )
-from bluetti_bt_connect_lib.registers import WriteableRegister, ReadableRegisters
-from bluetti_bt_connect_lib.const import WRITE_UUID, NOTIFY_UUID
 
 from .types import FullDeviceConfig, get_category
 from . import device_info as dev_info, get_unique_id
 from .const import DATA_COORDINATOR, DATA_LOCK, DOMAIN
 from .coordinator import PollingCoordinator
 from .utils import mac_loggable, unique_id_logable
-
-
-# Register 21000 was observed in the official app's own Bluetooth traffic,
-# written repeatedly (~once per second) the entire time the Settings screen
-# is open - a "presence" heartbeat, not tied to any specific toggle action.
-#
-# Direct log analysis (July 27) showed a previously-pending HA write to
-# grid export actually take effect ~8-9 seconds into a *fresh* app
-# connection, with no write to register 2208 anywhere near that moment -
-# strongly suggesting the trigger isn't the keep-alive write specifically,
-# but a period of sustained, successful two-way communication (the app
-# continuously reads many registers throughout this whole window, not just
-# writing 21000). The pure keep-alive-only version (repeated writes, no
-# reads) was tested live and did not resolve the issue.
-#
-# This version adds real register reads during the warm-up period,
-# reusing the existing connection via DeviceReader's ble_client parameter,
-# to more faithfully replicate what the app actually does. Still an
-# unverified hypothesis, scoped narrowly to this one field - every other
-# switch has worked reliably without any of this, and we don't want to
-# change behavior for anything that already works.
-SETTINGS_KEEPALIVE_REGISTER = 21000
-# The exact sequence observed, in order, across every capture analyzed
-# (July 27-28, including a full airplane-mode test confirming this is
-# entirely Bluetooth-local, no internet dependency involved): six specific
-# reads, always in this order, followed by a single write to register
-# 21000. In the one capture where a pending HA write was independently
-# confirmed to commit (log5.pklg), it did so in the ~0.9 second window
-# immediately after this exact sequence completed.
-SETTINGS_WARMUP_READS = [
-    (1, 16),
-    (100, 93),
-    (2000, 94),
-    (2200, 105),
-    (6000, 42),
-    (6100, 104),
-]
-SETTINGS_WARMUP_READ_TIMEOUT_SECONDS = 5
-
-# After the initial sequence + keep-alive write, the app doesn't just stop
-# and write - it continues its normal ~1/sec polling loop (a narrower
-# subset: 100, 2000, 2200, 6000, 6100 - no register 1, no 21000 again) for
-# several more seconds before any further action. This replicates that
-# sustained activity rather than jumping straight to the write immediately
-# after the one-shot sequence, in case the device expects continued
-# activity rather than just the initial handshake alone.
-SETTINGS_POLLING_CYCLE = [(100, 93), (2000, 94), (2200, 105), (6000, 42), (6100, 104)]
-SETTINGS_POLLING_CYCLE_REPEATS = 5
-
-FIELDS_REQUIRING_KEEPALIVE = {FieldName.GRID_EXPORT_ENABLED.value}
 
 
 async def async_setup_entry(
@@ -112,6 +61,7 @@ async def async_setup_entry(
 
     switches_to_add = []
     switch_fields = bluetti_device.get_switch_fields()
+
     for field in switch_fields:
         category = get_category(FieldName(field.name))
 
@@ -264,101 +214,14 @@ class BluettiSwitch(CoordinatorEntity, SwitchEntity):
             if not client.is_connected:
                 return
 
-            needs_keepalive = self._response_key in FIELDS_REQUIRING_KEEPALIVE
+            writer = DeviceWriter(client, self._bluetti_device, lock=self._lock)
 
-            # Everything below runs under one lock acquisition and one
-            # continuous connection, so the warm-up reads, keep-alive
-            # writes, and the actual write can never be split apart by the
-            # polling coordinator stepping in between them, and the
-            # connection is never disconnected until we're fully done.
-            async with self._lock:
-                async with async_timeout.timeout(45):
-                    try:
-                        if needs_keepalive:
-                            self._logger.debug(
-                                "Replaying observed connection sequence before writing %s",
-                                self._response_key,
-                            )
+            async with async_timeout.timeout(15):
+                # Send command
+                await writer.write(self._field.name, state)
 
-                            notify_future: asyncio.Future | None = None
-
-                            def _on_notify(_: int, data: bytearray):
-                                if notify_future is not None and not notify_future.done():
-                                    notify_future.set_result(bytes(data))
-
-                            await client.start_notify(NOTIFY_UUID, _on_notify)
-
-                            for addr, qty in SETTINGS_WARMUP_READS:
-                                notify_future = self.hass.loop.create_future()
-                                read_cmd = ReadableRegisters(addr, qty)
-                                await client.write_gatt_char(
-                                    WRITE_UUID, bytes(read_cmd)
-                                )
-                                try:
-                                    async with async_timeout.timeout(
-                                        SETTINGS_WARMUP_READ_TIMEOUT_SECONDS
-                                    ):
-                                        await notify_future
-                                except TimeoutError:
-                                    self._logger.debug(
-                                        "Warm-up read of address %s timed out, continuing anyway",
-                                        addr,
-                                    )
-
-                            await client.stop_notify(NOTIFY_UUID)
-
-                            self._logger.debug(
-                                "Sending settings keep-alive write before writing %s",
-                                self._response_key,
-                            )
-                            keepalive_cmd = WriteableRegister(
-                                SETTINGS_KEEPALIVE_REGISTER, 1
-                            )
-                            await client.write_gatt_char(
-                                WRITE_UUID, bytes(keepalive_cmd)
-                            )
-
-                            self._logger.debug(
-                                "Continuing normal polling cycle before writing %s, "
-                                "matching the app's sustained behavior",
-                                self._response_key,
-                            )
-                            await client.start_notify(NOTIFY_UUID, _on_notify)
-                            for _ in range(SETTINGS_POLLING_CYCLE_REPEATS):
-                                for addr, qty in SETTINGS_POLLING_CYCLE:
-                                    notify_future = self.hass.loop.create_future()
-                                    read_cmd = ReadableRegisters(addr, qty)
-                                    await client.write_gatt_char(
-                                        WRITE_UUID, bytes(read_cmd)
-                                    )
-                                    try:
-                                        async with async_timeout.timeout(
-                                            SETTINGS_WARMUP_READ_TIMEOUT_SECONDS
-                                        ):
-                                            await notify_future
-                                    except TimeoutError:
-                                        self._logger.debug(
-                                            "Polling-cycle read of address %s timed out, continuing anyway",
-                                            addr,
-                                        )
-                            await client.stop_notify(NOTIFY_UUID)
-
-                        command = self._bluetti_device.build_write_command(
-                            self._field.name, state
-                        )
-                        if command is None:
-                            self._logger.error("Field is not writeable")
-                            return
-
-                        self._logger.debug("Writing command: %s", command)
-                        await client.write_gatt_char(WRITE_UUID, bytes(command))
-                        self._logger.debug("Write successful")
-
-                        # Wait until device has changed value, otherwise
-                        # reading register might reset it
-                        await asyncio.sleep(5)
-                    finally:
-                        await client.disconnect()
+                # Wait until device has changed value, otherwise reading register might reset it
+                await asyncio.sleep(5)
 
         except TimeoutError:
             self._logger.error("Timed out for device %s", mac_loggable(self._address))
