@@ -14,6 +14,7 @@ FIELD_DEVICE_CLASS: Dict[FieldName, SensorDeviceClass] = {
     FieldName.AC_OUTPUT_VOLTAGE: SensorDeviceClass.VOLTAGE,
     FieldName.AC_P1_CURRENT: SensorDeviceClass.CURRENT,
     FieldName.AC_P1_POWER: SensorDeviceClass.POWER,
+    FieldName.TRUE_AC_TOTAL_POWER: SensorDeviceClass.POWER,
     FieldName.AC_P1_VOLTAGE: SensorDeviceClass.VOLTAGE,
     FieldName.AC_P2_CURRENT: SensorDeviceClass.CURRENT,
     FieldName.AC_P2_POWER: SensorDeviceClass.POWER,
