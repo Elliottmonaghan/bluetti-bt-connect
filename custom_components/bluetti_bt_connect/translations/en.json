@@ -416,6 +416,9 @@
             },
             "ctrl_ups_mode": {
                 "name": "UPS Mode"
+            },
+            "working_mode": {
+                "name": "Working Mode"
             }
         },
         "binary_sensor": {
@@ -462,6 +465,12 @@
         "number": {
             "max_grid_export_power": {
                 "name": "Max Grid Export Power"
+            },
+            "ctrl_grid_max_current": {
+                "name": "Max Grid Import Current"
+            },
+            "ctrl_grid_input_current": {
+                "name": "Grid Input Current Limit"
             }
         }
     }
