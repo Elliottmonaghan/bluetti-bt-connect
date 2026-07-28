@@ -315,7 +315,7 @@
                 "name": "Load Phase 3 Power"
             },
             "total_ac_power": {
-                "name": "Total AC Power"
+                "name": "Total AC Activity (Magnitude)"
             },
             "total_self_consumption": {
                 "name": "Total Self Consumption"
@@ -358,6 +358,9 @@
             },
             "total_grid_feed": {
                 "name": "Total Grid Feed-In"
+            },
+            "true_ac_total_power": {
+                "name": "True AC Total Power (Net)"
             }
         },
         "switch": {
