@@ -87,6 +87,25 @@ async def async_setup_entry(
                 )
             )
 
+    # Computed sensor, not tied to any real device register - see
+    # coordinator.py for where the value is actually calculated. Uses a
+    # clearly out-of-range placeholder address since none is applicable;
+    # only the response_key is used to look up its value.
+    true_total_unit = get_unit(FieldName.TRUE_AC_TOTAL_POWER)
+    sensors_to_add.append(
+        BluettiSensor(
+            coordinator,
+            device_info,
+            999999,
+            FieldName.TRUE_AC_TOTAL_POWER.value,
+            unit_of_measurement=true_total_unit,
+            device_class=get_device_class(FieldName.TRUE_AC_TOTAL_POWER),
+            state_class=get_state_class(FieldName.TRUE_AC_TOTAL_POWER),
+            category=None if config.use_encryption else get_category(FieldName.TRUE_AC_TOTAL_POWER),
+            logger=logger,
+        )
+    )
+
     # Pack fields
     for field in bluetti_device.pack_fields:
         field_name = FieldName(field.name)

@@ -7,7 +7,7 @@ import logging
 from homeassistant.components import bluetooth
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
-from bluetti_bt_connect_lib import build_device, DeviceReader, DeviceReaderConfig
+from bluetti_bt_connect_lib import build_device, DeviceReader, DeviceReaderConfig, FieldName
 
 from .utils import mac_loggable
 from .types import FullDeviceConfig
@@ -83,5 +83,18 @@ class PollingCoordinator(DataUpdateCoordinator):
         data = await self.reader.read()
         if data is None:
             raise UpdateFailed("Error while reading data from device")
+
+        # Computed, not read from any device register: the existing
+        # "Total AC Power" register was found (July 28) to actually report
+        # |P1| + |P2| + |P3| - an unsigned magnitude, not a true net
+        # directional figure. It matches the real signed total during
+        # discharge (when phases are already positive) but diverges
+        # sharply during charging. This provides the correct signed sum
+        # for anyone wanting true net home/battery AC power.
+        p1 = data.get(FieldName.AC_P1_POWER.value)
+        p2 = data.get(FieldName.AC_P2_POWER.value)
+        p3 = data.get(FieldName.AC_P3_POWER.value)
+        if p1 is not None and p2 is not None and p3 is not None:
+            data[FieldName.TRUE_AC_TOTAL_POWER.value] = p1 + p2 + p3
 
         return data
