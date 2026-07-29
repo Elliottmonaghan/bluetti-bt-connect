@@ -466,6 +466,9 @@
             "max_grid_export_power": {
                 "name": "Max Grid Export Power"
             },
+            "max_grid_export_current": {
+                "name": "Max Grid Export Current"
+            },
             "ctrl_grid_max_current": {
                 "name": "Max Grid Import Current"
             },
