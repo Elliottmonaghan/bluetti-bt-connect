@@ -61,15 +61,25 @@ class PollingCoordinator(DataUpdateCoordinator):
         so entities can quickly look up their data.
         """
 
-        # Check if device is connected
-        if (
-            bluetooth.async_address_present(
-                self.hass, self.config.address, connectable=True
-            )
-            is False
-        ):
-            self.logger.warning("Device not connected")
-            raise UpdateFailed("Device not connected")
+        # Check the device is reachable before trying to talk to it.
+        #
+        # async_address_present() answers from advertisement history, so it
+        # only means anything while we are NOT connected: a BLE peripheral
+        # generally stops advertising once a central is attached, so on a
+        # held-open connection the last advertisement eventually goes stale
+        # and this returns False for a device that is right there and
+        # answering us. Skip the check whenever we already hold a live
+        # connection - that connection is the better liveness signal, and a
+        # link that has actually dropped surfaces as a read failure below.
+        if self.reader is None or not self.reader.is_connected:
+            if (
+                bluetooth.async_address_present(
+                    self.hass, self.config.address, connectable=True
+                )
+                is False
+            ):
+                self.logger.warning("Device not connected")
+                raise UpdateFailed("Device not connected")
 
         if self.reader is None:
             self.logger.error(
