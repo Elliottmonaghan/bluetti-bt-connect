@@ -32,6 +32,7 @@
     "integration_type": "device",
     "iot_class": "local_polling",
     "issue_tracker": "https://github.com/Elliottmonaghan/bluetti-bt-connect/issues",
-    "requirements": ["bluetti_bt_connect_lib @ git+https://github.com/Elliottmonaghan/bluetti-bt-connect-lib.git"],
-    "version": "1.4.0"
+    "loggers": ["bluetti_bt_connect_lib"],
+    "requirements": ["bluetti-bt-connect-lib==1.5.0"],
+    "version": "1.5.0"
 }
