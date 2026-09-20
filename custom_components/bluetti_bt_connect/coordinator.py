@@ -7,10 +7,17 @@ import logging
 from homeassistant.components import bluetooth
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
-from bluetti_bt_connect_lib import build_device, DeviceReader, DeviceReaderConfig, FieldName
+from bluetti_bt_connect_lib import (
+    build_device,
+    DeviceConnection,
+    DeviceReader,
+    DeviceReaderConfig,
+    FieldName,
+)
 
 from .utils import mac_loggable
 from .types import FullDeviceConfig
+from .const import WRITE_KEEP_ALIVE_SECONDS
 
 
 class PollingCoordinator(DataUpdateCoordinator):
@@ -21,6 +28,7 @@ class PollingCoordinator(DataUpdateCoordinator):
         hass: HomeAssistant,
         config: FullDeviceConfig,
         lock: asyncio.Lock,
+        connection: DeviceConnection | None = None,
     ):
         """Initialize coordinator."""
         super().__init__(
@@ -33,6 +41,7 @@ class PollingCoordinator(DataUpdateCoordinator):
         )
 
         self.config = config
+        self.connection = connection
         self.reader = None
 
         # Create client
@@ -50,8 +59,10 @@ class PollingCoordinator(DataUpdateCoordinator):
             DeviceReaderConfig(
                 config.polling_timeout,
                 config.use_encryption,
+                keep_alive_seconds=WRITE_KEEP_ALIVE_SECONDS,
             ),
             lock,
+            connection=connection,
         )
 
     async def _async_update_data(self):

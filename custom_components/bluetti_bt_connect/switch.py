@@ -3,9 +3,6 @@
 from __future__ import annotations
 import asyncio
 import logging
-import async_timeout
-from bleak import BleakScanner
-from bleak_retry_connector import BleakClientWithServiceCache, establish_connection
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
@@ -19,14 +16,13 @@ from homeassistant.helpers.update_coordinator import (
 from bluetti_bt_connect_lib import (
     build_device,
     BluettiDevice,
-    DeviceWriter,
     DeviceField,
     FieldName,
 )
 
 from .types import FullDeviceConfig, get_category
 from . import device_info as dev_info, get_unique_id
-from .const import DATA_COORDINATOR, DATA_LOCK, DOMAIN
+from .const import DATA_COORDINATOR, DATA_LOCK, DOMAIN, WRITE_SETTLE_SECONDS
 from .coordinator import PollingCoordinator
 from .utils import mac_loggable, unique_id_logable
 
@@ -112,6 +108,7 @@ class BluettiSwitch(CoordinatorEntity, SwitchEntity):
         self._attr_available = False
         self._attr_unique_id = get_unique_id(e_name)
         self._attr_entity_category = category
+        self._last_write_result = None
 
     @property
     def available(self) -> bool:
@@ -122,14 +119,36 @@ class BluettiSwitch(CoordinatorEntity, SwitchEntity):
         """Set switch as available."""
         self._attr_available = True
         self._unavailable_counter = 0
-        self._attr_extra_state_attributes = {}
+        self._attr_extra_state_attributes = self._write_attributes()
         self.async_write_ha_state()
+
+    def _write_attributes(self) -> dict:
+        """Expose the device's verdict on the last write.
+
+        Previously a rejected write was indistinguishable from an accepted
+        one. Surfacing it here means a control that silently does nothing
+        says so, in the place someone would look.
+        """
+        result = self._last_write_result
+
+        if result is None:
+            return {}
+
+        attributes = {"last_write": result.outcome.value}
+
+        if result.exception_code is not None:
+            attributes["last_write_exception"] = (
+                f"0x{result.exception_code:02x} ({result.exception_meaning})"
+            )
+
+        return attributes
 
     def _set_unavailable(self, cause: str = "Unknown"):
         """Set switch as unavailable."""
         self._unavailable_counter += 1
 
         self._attr_extra_state_attributes = {
+            **self._write_attributes(),
             "unavailable_counter": self._unavailable_counter,
             "unavailable_cause": cause,
         }
@@ -194,35 +213,23 @@ class BluettiSwitch(CoordinatorEntity, SwitchEntity):
         await self.write_to_device(False)
 
     async def write_to_device(self, state: bool):
-        """Write to device."""
+        """Write to device and report what it said.
 
-        try:
-            device = await BleakScanner.find_device_by_address(self._address, timeout=5)
+        The write goes through the coordinator's reader, so it travels on the
+        connection polling already uses - no second link to race with, and
+        the device's Modbus reply is read instead of discarded. Acceptance is
+        confirmed by the device now rather than assumed.
+        """
 
-            if device is None:
-                return
+        result = await self.coordinator.reader.write(self._field.name, state)
 
-            client = await establish_connection(
-                BleakClientWithServiceCache,
-                device,
-                device.name or "Unknown Device",
-                max_attempts=10,
-            )
+        self._last_write_result = result
 
-            if not client.is_connected:
-                return
+        if not result.accepted:
+            self._logger.warning("Write was not confirmed - %s", result)
 
-            writer = DeviceWriter(client, self._bluetti_device, lock=self._lock)
-
-            async with async_timeout.timeout(15):
-                await writer.write(self._field.name, state)
-
-                # Wait for the device to apply the change - reading back
-                # too soon can return the pre-write value.
-                await asyncio.sleep(5)
-
-        except TimeoutError:
-            self._logger.error("Timed out for device %s", mac_loggable(self._address))
-            return None
+        # The echo already confirms acceptance; this only lets the register
+        # catch up so the read-back shows the new value.
+        await asyncio.sleep(WRITE_SETTLE_SECONDS)
 
         await self.coordinator.async_request_refresh()
