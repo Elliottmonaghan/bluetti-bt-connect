@@ -29,6 +29,18 @@
     },
     "entity": {
         "sensor": {
+            "diag_remote_set": {
+                "name": "Diag 2073 remoteSet"
+            },
+            "diag_remote_set_soc": {
+                "name": "Diag 2074 remoteSetSoc"
+            },
+            "diag_set_ctrl_power_on": {
+                "name": "Diag 2013 SetCtrlPowerOn"
+            },
+            "diag_set_ctrl_work_mode": {
+                "name": "Diag 2005 SetCtrlWorkMode"
+            },
             "ac_input_current": {
                 "name": "AC Input Current"
             },
