@@ -22,7 +22,13 @@ from bluetti_bt_connect_lib import (
 
 from .types import FullDeviceConfig, get_category
 from . import device_info as dev_info, get_unique_id
-from .const import DATA_COORDINATOR, DATA_LOCK, DOMAIN, WRITE_SETTLE_SECONDS
+from .const import (
+    CONNECTION_RELEASE_SECONDS,
+    DATA_COORDINATOR,
+    DATA_LOCK,
+    DOMAIN,
+    WRITE_SETTLE_SECONDS,
+)
 from .coordinator import PollingCoordinator
 from .utils import mac_loggable, unique_id_logable
 
@@ -71,6 +77,10 @@ async def async_setup_entry(
                 logger=logger,
             )
         )
+
+    switches_to_add.append(
+        BluettiConnectionHoldSwitch(coordinator, device_info, logger)
+    )
 
     async_add_entities(switches_to_add)
 
@@ -221,6 +231,17 @@ class BluettiSwitch(CoordinatorEntity, SwitchEntity):
         confirmed by the device now rather than assumed.
         """
 
+        if self.coordinator.connection_released:
+            # The connection was handed over on purpose. Writing would take
+            # it straight back and boot whatever is using it, which is not
+            # what someone flicking a switch expects to happen.
+            self._logger.warning(
+                "Not writing %s - the Bluetooth connection is released until %s",
+                self._field.name,
+                self.coordinator.release_until,
+            )
+            return
+
         result = await self.coordinator.reader.write(self._field.name, state)
 
         self._last_write_result = result
@@ -233,3 +254,74 @@ class BluettiSwitch(CoordinatorEntity, SwitchEntity):
         await asyncio.sleep(WRITE_SETTLE_SECONDS)
 
         await self.coordinator.async_request_refresh()
+
+
+class BluettiConnectionHoldSwitch(CoordinatorEntity, SwitchEntity):
+    """Holds or releases the shared Bluetooth connection.
+
+    The connection is kept open permanently so polls and writes do not pay
+    for setup each time. The device only accepts one central, so while it is
+    held the Bluetti phone app cannot connect - and the app is still the only
+    way to independently verify a grid setting actually took.
+
+    Turning this off hands the device back. It turns itself on again after
+    CONNECTION_RELEASE_SECONDS, so forgetting costs one gap in the data
+    rather than silently killing the integration.
+    """
+
+    _attr_has_entity_name = True
+    _attr_name = "Hold Bluetooth connection"
+    _attr_icon = "mdi:bluetooth-connect"
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(
+        self,
+        coordinator: PollingCoordinator,
+        device_info: DeviceInfo,
+        logger: logging.Logger = logging.getLogger(),
+    ):
+        super().__init__(coordinator)
+        self.coordinator = coordinator
+        self._logger = logger
+
+        self._attr_device_info = device_info
+        self._attr_unique_id = get_unique_id(
+            f"{device_info.get('name')} hold bluetooth connection"
+        )
+
+    @property
+    def available(self) -> bool:
+        # Deliberately always available: this is how you get the connection
+        # back, so it must still work when everything else has gone stale.
+        return True
+
+    @property
+    def is_on(self) -> bool:
+        return not self.coordinator.connection_released
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        connection = self.coordinator.connection
+
+        attributes = {
+            "connected": connection.is_connected if connection is not None else False,
+        }
+
+        if self.coordinator.release_until is not None:
+            attributes["resumes_at"] = self.coordinator.release_until.isoformat()
+
+        return attributes
+
+    async def async_turn_on(self, **kwargs):
+        """Take the connection back and resume polling now."""
+        await self.coordinator.async_hold_connection()
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs):
+        """Hand the device over - to the Bluetti app, or anything else."""
+        await self.coordinator.async_release_connection(CONNECTION_RELEASE_SECONDS)
+        self.async_write_ha_state()
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        self.async_write_ha_state()

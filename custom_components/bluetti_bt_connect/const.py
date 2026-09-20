@@ -9,18 +9,28 @@ DATA_COORDINATOR = "coordinator"
 DATA_LOCK = "lock"
 DATA_CONNECTION = "connection"
 
-WRITE_KEEP_ALIVE_SECONDS = 10
+CONNECTION_KEEP_ALIVE_SECONDS = -1
 """How long the shared BLE connection is held open after a conversation.
 
-The device accepts one central at a time, so a permanently held link locks
-out the Bluetti phone app - which the README still tells you to use when
-verifying grid settings. Ten seconds is chosen to span a write and the
-refresh that follows it, so those share one connection, while still
-dropping the link well inside the polling interval.
+Negative holds it indefinitely, which is the point: connection setup stops
+happening on every poll, and a write lands on a link that is already up.
 
-Raise it above the polling interval to keep the connection up permanently
-and remove connection setup from every poll. That is faster, and it costs
-you the phone app while Home Assistant is running.
+The cost is that the device accepts one central at a time, so while this is
+held the Bluetti phone app cannot connect. The "Hold Bluetooth connection"
+switch releases it on demand, and puts itself back after
+CONNECTION_RELEASE_SECONDS so a forgotten release cannot leave the
+integration dead.
+
+A positive value instead drops the link that many seconds after each
+conversation - 0 restores the original connect-per-poll behaviour.
+"""
+
+CONNECTION_RELEASE_SECONDS = 300
+"""How long a released connection stays released before resuming on its own.
+
+Long enough to do something useful in the Bluetti app, short enough that
+forgetting to switch it back costs one gap in the data rather than all of
+it.
 """
 
 WRITE_SETTLE_SECONDS = 2

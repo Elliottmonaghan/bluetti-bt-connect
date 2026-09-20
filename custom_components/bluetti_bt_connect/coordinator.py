@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 import asyncio
-from datetime import timedelta
+from datetime import datetime, timedelta
 import logging
 from homeassistant.components import bluetooth
 from homeassistant.core import HomeAssistant
@@ -17,7 +17,9 @@ from bluetti_bt_connect_lib import (
 
 from .utils import mac_loggable
 from .types import FullDeviceConfig
-from .const import WRITE_KEEP_ALIVE_SECONDS
+from homeassistant.util import dt as dt_util
+
+from .const import CONNECTION_KEEP_ALIVE_SECONDS, CONNECTION_RELEASE_SECONDS
 
 
 class PollingCoordinator(DataUpdateCoordinator):
@@ -44,6 +46,16 @@ class PollingCoordinator(DataUpdateCoordinator):
         self.connection = connection
         self.reader = None
 
+        self.release_until: datetime | None = None
+        """When a deliberate release expires, or None while holding.
+
+        The connection is held open permanently, so something has to be able
+        to let go of it - the device accepts one central at a time and the
+        Bluetti app is locked out until we do. Polling is suspended for the
+        duration, otherwise the next poll would immediately reconnect and
+        take the device back.
+        """
+
         # Create client
         self.logger.info("Creating client for %s", config.name)
         bluetti_device = build_device(config.name)
@@ -59,11 +71,42 @@ class PollingCoordinator(DataUpdateCoordinator):
             DeviceReaderConfig(
                 config.polling_timeout,
                 config.use_encryption,
-                keep_alive_seconds=WRITE_KEEP_ALIVE_SECONDS,
+                keep_alive_seconds=CONNECTION_KEEP_ALIVE_SECONDS,
             ),
             lock,
             connection=connection,
         )
+
+    @property
+    def connection_released(self) -> bool:
+        """Whether the connection is currently released for something else."""
+        return self.release_until is not None and dt_util.utcnow() < self.release_until
+
+    async def async_release_connection(
+        self, seconds: int = CONNECTION_RELEASE_SECONDS
+    ) -> None:
+        """Drop the connection and stay off the device for a while.
+
+        Resumption is not on a timer of its own - the next scheduled poll
+        after the window expires simply reconnects. One less thing to cancel,
+        and nothing left running if the entry unloads meanwhile.
+        """
+        self.release_until = dt_util.utcnow() + timedelta(seconds=seconds)
+        self.logger.info(
+            "Releasing the Bluetooth connection until %s", self.release_until
+        )
+
+        if self.connection is not None:
+            await self.connection.disconnect()
+
+    async def async_hold_connection(self) -> None:
+        """Resume immediately, before the release window is up."""
+        if self.release_until is None:
+            return
+
+        self.release_until = None
+        self.logger.info("Resuming the Bluetooth connection")
+        await self.async_request_refresh()
 
     async def _async_update_data(self):
         """Fetch data from API endpoint.
@@ -71,6 +114,21 @@ class PollingCoordinator(DataUpdateCoordinator):
         This is the place to pre-process the data to lookup tables
         so entities can quickly look up their data.
         """
+
+        if self.connection_released:
+            # Deliberately off the device. Keep the last reading rather than
+            # marking everything unavailable - the data is stale, not gone,
+            # and this is a state the user asked for.
+            self.logger.debug("Connection released until %s", self.release_until)
+
+            if self.data is None:
+                raise UpdateFailed("Bluetooth connection released")
+
+            return self.data
+
+        if self.release_until is not None:
+            self.logger.info("Release window expired, reconnecting")
+            self.release_until = None
 
         # Check the device is reachable before trying to talk to it.
         #

@@ -215,6 +215,16 @@ class BluettiSelect(CoordinatorEntity, SelectEntity):
         confirmed by the device now rather than assumed.
         """
 
+        if self.coordinator.connection_released:
+            # Released on purpose - writing would take the device
+            # straight back from whatever is using it.
+            self._logger.warning(
+                "Not writing %s - the Bluetooth connection is released until %s",
+                self._field.name,
+                self.coordinator.release_until,
+            )
+            return
+
         result = await self.coordinator.reader.write(self._field.name, state)
 
         self._last_write_result = result
