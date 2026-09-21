@@ -13,11 +13,42 @@ Bluetti Integration for Home Assistant
 ## Disclaimer
 This integration is provided without any warranty or support by Bluetti. I do not take responsibility for any problems it may cause in all cases. Use it at your own risk.
 
-## ⚠️ EP2000: grid/mode controls carry real risk - read before using
+## ✅ EP2000: local control works (v2.0)
 
-AC Output, Charge From Grid, Grid Export, Working Mode, and all four grid import/export power and current limits remain writable controls in this build. Writes into the grid-related settings on this device were found to sometimes get a clean acknowledgment from Home Assistant without the change actually taking effect on the device - a silent failure with no error shown anywhere. **Do not assume a setting change has taken effect just because Home Assistant accepted it without error** - verify independently (in the official Bluetti app, or against real grid behavior) before relying on any change you make here. This matches a well-documented industry-wide pattern of grid-compliance settings being authentication-gated across comparable solar/battery hardware, not something specific to this fork - and it's worth knowing that grid-export and grid-protection parameters are also regulated for interconnection safety in most jurisdictions, independent of whether a given write actually persists.
+Earlier builds warned that grid and working-mode writes on the EP2000 were
+accepted without error and then silently reverted. **That is fixed in v2.0.** The
+underlying library now sends settings writes to the correct Modbus slave - **slave
+0**, the device's settings controller - instead of slave 1 (the inverter, which
+echoed writes and then overwrote them from the slave-0 setpoint). Grid
+import/export limits, working mode and the switches all **write and persist** over
+local Bluetooth now. Full detail is in the
+[library's v2.0 release notes](https://github.com/Elliottmonaghan/bluetti-bt-connect-lib/blob/main/RELEASE_NOTES_2.0.0.md).
 
-**Full technical detail and the research behind this warning are in the [bluetti-bt-connect-lib README](https://github.com/Elliottmonaghan/bluetti-bt-connect-lib#readme)** (look for the "grid/mode controls carry real risk" section near the top) - read that before relying on any of these controls, or before filing an issue if one doesn't seem to work.
+### EP2000 controls
+
+| Entity | Register | Notes |
+|--------|----------|-------|
+| AC Output | 2011 | switch |
+| Charge From Grid | 2207 | switch |
+| Grid Export | 2208 | switch |
+| Max Grid Export Power | 2215 | W |
+| Max Grid Export Current | 2216 | A |
+| Max Grid Import Power | 2213 | W |
+| Max Grid Import Current | 2214 | A |
+| Working Mode | 2005 | Custom / Self-use / Backup / Time-of-use |
+| AI Control Mode | 2241 | switch - **on** = Bluetti's AI/EMS manages the system and overrides manual settings; **off** = manual control |
+
+**Two things to know:**
+
+- After changing a setting, give it a few seconds to settle before trusting the
+  value shown - the write goes to the device's settings controller and takes a
+  moment to propagate back to the reading.
+- If manual settings ever stop sticking, check **AI Control Mode**. If it is on,
+  Bluetti's AI is overriding you - turn it off for manual control.
+
+**Grid export and grid-protection settings are regulated for grid-interconnection
+safety in many jurisdictions** (anti-islanding, voltage/frequency ride-through).
+Know your local rules before changing them.
 
 ## Installation
 To install this integration, you first need [HACS](https://hacs.xyz/) installed.
