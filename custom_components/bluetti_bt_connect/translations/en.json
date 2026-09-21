@@ -17,8 +17,7 @@
                 "data": {
                     "polling_interval": "Polling interval in seconds (restart required)",
                     "polling_timeout": "Polling timeout in seconds (restart required)",
-                    "max_retries": "Maximum amount of connection retries (restart required)",
-                    "bt_password": "Bluetooth settings password (leave blank if none is set; restart required)"
+                    "max_retries": "Maximum amount of connection retries (restart required)"
                 }
             }
         },
@@ -367,6 +366,9 @@
             },
             "charge_from_grid_enabled": {
                 "name": "Charge From Grid"
+            },
+            "ems_control": {
+                "name": "AI Control Mode"
             }
         },
         "select": {
