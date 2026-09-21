@@ -17,6 +17,7 @@ class FullDeviceConfig:
         self.polling_interval = optional.polling_interval
         self.polling_timeout = optional.polling_timeout
         self.max_retries = optional.max_retries
+        self.bt_password = optional.bt_password
 
     @staticmethod
     def from_dict(raw: Dict[str, Any]):

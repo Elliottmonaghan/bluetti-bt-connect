@@ -72,6 +72,7 @@ class PollingCoordinator(DataUpdateCoordinator):
                 config.polling_timeout,
                 config.use_encryption,
                 keep_alive_seconds=CONNECTION_KEEP_ALIVE_SECONDS,
+                unlock_password=config.bt_password,
             ),
             lock,
             connection=connection,

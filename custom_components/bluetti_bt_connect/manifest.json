@@ -33,6 +33,6 @@
     "iot_class": "local_polling",
     "issue_tracker": "https://github.com/Elliottmonaghan/bluetti-bt-connect/issues",
     "loggers": ["bluetti_bt_connect_lib"],
-    "requirements": ["bluetti-bt-connect-lib==1.7.0"],
-    "version": "1.7.0"
+    "requirements": ["bluetti-bt-connect-lib==1.8.0"],
+    "version": "1.8.0"
 }
